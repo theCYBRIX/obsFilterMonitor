@@ -1,69 +1,40 @@
 import os
 import sys
-import obspython as obs # type: ignore
+import obspython as obs # pyright: ignore[reportMissingImports]
 import json
 from configparser import RawConfigParser
 import os.path
 from http.server import SimpleHTTPRequestHandler
 from socketserver import TCPServer
 from threading import Thread
+import random
 import time
+from typing import (
+    # Any,
+    # Awaitable,
+    Optional
+)
+import asyncio
+try:
+    from websockets.legacy.server import (
+        Serve,
+        serve,
+        WebSocketServerProtocol
+    )
+except:
+    print("Missing import websockets 9.1.\n\tIn your OBS Python installation run 'pip install websockets==9.1'")
 
 
-class ReusableServer(TCPServer):
-    allow_reuse_address = True
-    allow_reuse_port = True
+    # TODO: Make monitor.html use Websocket for settings request
+    # TODO: Make monitor.html receive refresh requests from Websocket
 
 
-class SettingsServer:
-    def __init__(self) -> None:
-        self.http_service: ReusableServer | None = None
-        self.server_running: bool = False
-        self.shutdown_requested: bool = False
-
-    def run(self) -> None:
-        try:
-            with ReusableServer(("", PORT), SettingsRequestHandler) as service:
-                self.server_running = True
-                self.http_service = service
-                SCRIPT_CONTEXT.debug_message(f"Serving on port {PORT}")
-                service.serve_forever(0.5)
-                SCRIPT_CONTEXT.debug_message(
-                    'Server shutdown. (This may be the previous server, if the script was reloaded.)')
-        finally:
-            self.server_running = False
-            if self.http_service:
-                self.http_service.server_close()
-                self.http_service = None
-
-    def try_start_server(self, retry_delay: float | None = None, timeout: float | None = None) -> None:
-        self.shutdown_requested = False
-        start_time: float = time.time()
-        timed_out: bool = False
-        while timeout == None or not timed_out:
-
-            if self.shutdown_requested:
-                break
-            try:
-                SCRIPT_CONTEXT.debug_message('Starting settings server...')
-                self.run()
-            except BaseException as error:
-                SCRIPT_CONTEXT.debug_message(
-                    f'Unable to start server: {error}')
-                if retry_delay == None:
-                    continue
-                if self.shutdown_requested:
-                    break
-                time.sleep(retry_delay)
-                timed_out = (time.time() - start_time) >= (timeout or 2.0)
-        if timed_out:
-            SCRIPT_CONTEXT.print_error(
-                "Server timed out. Reload the script to try again.")
-
-    def shutdown_server(self) -> None:
-        self.shutdown_requested = True
-        if self.server_running and self.http_service:
-            self.http_service.shutdown()
+DEFAULT_RETRY_FREQUENCY: float = 0.5
+DEFAULT_RETRY_DURATION: float = 2.0
+PORT = 6005
+SCRIPT_PATH: str = os.path.dirname(os.path.abspath(__file__)) + os.path.sep
+CONFIG_FILE: str = SCRIPT_PATH + "config.json"
+STATE_FILE: str = SCRIPT_PATH + "script_state.ini"
 
 
 class ScriptContext:
@@ -71,7 +42,6 @@ class ScriptContext:
         self.obs_properties = None
         self.obs_data = None
         self.debug: bool = False
-        self.settings_server: SettingsServer = SettingsServer()
 
     def debug_message(self, msg: str) -> None:
         if self.debug:
@@ -84,67 +54,93 @@ class ScriptContext:
         self.obs_properties = None
         self.obs_data = None
 
-    def start_server_asynch(self, retry_delay: float | None = None, timeout: float | None = None) -> None:
-        self.__do_async("HTTP Server", lambda: self.settings_server.try_start_server(
-            retry_delay, timeout), as_daemon=True)
 
-    def shutdown_server_async(self):
-        self.__do_async("Server Shutdown Watcher",
-                        self.settings_server.shutdown_server, as_daemon=True)
+class SettingsServer:
+    def __init__(self) -> None:
+        self.settings_server : Optional[Serve] = None
+        self.websocket_peers : list[WebSocketServerProtocol] = []
+        self.asyncio_thread : Optional[Thread] = None
+        self.asyncio_loop : Optional[asyncio.AbstractEventLoop] = None
 
-    def __do_async(self, thread_name: str | None = None, task=None, as_daemon: bool = True) -> None:
-        thread: Thread = Thread(
-            name=thread_name, target=task, daemon=as_daemon)
+    def clear(self):
+        self.asyncio_loop = None
+        self.asyncio_thread = None
+        self.settings_server = None
+
+    def start(self, host : str = "localhost", port : int = PORT) -> None:
+        SCRIPT_CONTEXT.debug_message('Starting settings server...')
+
+        def run_service():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            self.asyncio_loop = loop
+
+            start_server = serve(self.handle_websocket, host, port)
+            self.settings_server = start_server
+
+            loop.run_until_complete(start_server)
+            loop.run_forever()
+        
+        thread = Thread(target=run_service, name="Settings Server", daemon=True)
+        self.asyncio_thread = thread
         thread.start()
 
+    def stop(self, code : int = 1000, reason : str = "") -> None:
+        if not self.asyncio_loop:
+            return
 
-class SettingsRequestHandler(SimpleHTTPRequestHandler):
-    def do_GET(self) -> None:
-        SCRIPT_CONTEXT.debug_message("Received request: " + self.path)
+        SCRIPT_CONTEXT.debug_message("Shutting down settings server...")
+        
+        asyncio_loop = self.asyncio_loop
 
-        query_param = self.path
+        async def close_all():
+            if self.settings_server:
+                for peer in self.websocket_peers:
+                    await peer.close(code, reason)
+                self.settings_server.ws_server.close()
+                await self.settings_server.ws_server.wait_closed()
+            asyncio_loop.stop()
+        
+        asyncio.run_coroutine_threadsafe(close_all(), self.asyncio_loop)
 
-        if query_param == '/?settings':
-            self.handle_settings_request()
-        else:
-            self.send_error(404, "Invalid Request.",
-                            "Monitor config only supports settings requests.")
-            SCRIPT_CONTEXT.debug_message("Request rejected.")
-
-    def handle_settings_request(self) -> None:
-        self.send_response(200)
-        self.send_header('Content-type', 'application/json')
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.end_headers()
-        settings_data = json.dumps(settings_as_dict(SCRIPT_CONTEXT.obs_data))
-        SCRIPT_CONTEXT.debug_message(settings_data)
-        self.wfile.write(settings_data.encode())
-        SCRIPT_CONTEXT.debug_message("Request handled.")
-
-    def log_message(self, format: str, *args) -> None:
-        if SCRIPT_CONTEXT.debug:
-            super().log_message(format, *args)
+    async def handle_websocket(self, websocket : WebSocketServerProtocol, path : str):# -> Awaitable[Any]:
+        self.websocket_peers.append(websocket)
+        async for message in websocket:
+            SCRIPT_CONTEXT.debug_message(f"Received> {message}")
+            if message == "?settings":
+                await websocket.send(json.dumps(settings_as_dict(SCRIPT_CONTEXT.obs_data)))
+                SCRIPT_CONTEXT.debug_message("OK> Request handled.")
+            elif message == "!stop":
+                await websocket.send("Terminating Websocket Server...")
+                SCRIPT_CONTEXT.debug_message("OK> Request handled.")
+                self.stop(reason="Shutdown requested.")
+                return
+            elif message in ("test", "testing", "hello", "hi"):
+                await websocket.send(random.choice(("Well, hello there!", "Hi~! ^_^", "Hello! :D")))
+                SCRIPT_CONTEXT.debug_message("OK> Completed social obligations.")
+            else:
+                SCRIPT_CONTEXT.debug_message(f'Request rejected: "{message}"')
+                await websocket.send(f'ERROR> Unknown request "{message}"')
 
 
 SCRIPT_CONTEXT: ScriptContext = ScriptContext()
-DEFAULT_RETRY_FREQUENCY: float = 0.5
-DEFAULT_RETRY_DURATION: float = 2.0
-PORT = 6005
-SCRIPT_PATH: str = os.path.dirname(os.path.abspath(__file__)) + os.path.sep
-CONFIG_FILE: str = SCRIPT_PATH + "config.json"
-STATE_FILE: str = SCRIPT_PATH + "script_state.ini"
+SETTINGS_SERVER : SettingsServer = SettingsServer()
 
 
 def script_load(settings) -> None:
     load_state()
     SCRIPT_CONTEXT.obs_data = settings
-    SCRIPT_CONTEXT.start_server_asynch(
-        DEFAULT_RETRY_FREQUENCY, DEFAULT_RETRY_DURATION)
+    SETTINGS_SERVER.start()
 
 
-def script_unload() -> None:
-    SCRIPT_CONTEXT.shutdown_server_async()
+def script_unload():
+    SETTINGS_SERVER.stop(reason="Script Unloading.")
+
+    if SETTINGS_SERVER.asyncio_thread:
+        SETTINGS_SERVER.asyncio_thread.join()
+
     SCRIPT_CONTEXT.clear()
+    SETTINGS_SERVER.clear()
 
 
 def script_save(settings) -> None:
@@ -158,12 +154,12 @@ def script_defaults(settings) -> None:
     obs.obs_data_set_default_string(settings, "_address", "127.0.0.1")
     obs.obs_data_set_default_int(settings, "_port", int(4455))
     obs.obs_data_set_default_int(settings, "_color", int("ff32Cd32", 16))
-    obs.obs_data_set_default_string(settings, "_browser_dock_name", "Filter Monitor")
+    obs.obs_data_set_default_string(
+        settings, "_browser_dock_name", "Filter Monitor")
 
 
-def script_description() -> str:
-    return "<h1>OBS Filter Monitor Config</h1>\nAdd and remove filters from OBS Filter Monitor on the fly." \
-        + "<br>To update the Dock after modifying settings, right-glick it and select \"refresh\"."
+def script_description():
+    return "<h1>OBS Filter Monitor Config</h1>\n<p>Add and remove filters from OBS Filter Monitor on the fly.</p>"
 
 
 # Initializes UI elements
@@ -270,16 +266,16 @@ def on_import_config_pressed(props, prop) -> bool:
     file_path: str = obs.obs_data_get_string(data, "_import_path")
 
     try:
-        filterList, password, host = load_config(data, file_path)
+        filterList, password, host = load_config(file_path)
 
         if import_method == "_import_add_filters":
             if not filterList:
-                raise ValueError("Missing filterlist")
+                raise ValueError("Missing filterList")
             add_filters(data, filterList)
 
         if import_method == "_import_set_filters" or import_method == "_import_set_all":
             if not filterList:
-                raise ValueError("Missing filterlist")
+                raise ValueError("Missing filterList")
             set_filters(data, filterList)
 
         if import_method == "_import_set_websocket" or import_method == "_import_set_all":
@@ -332,13 +328,13 @@ def save_config(settings, file_path: str) -> None:
     try:
         save_to_file(file_path, json.dumps(settings_as_dict(settings)))
         SCRIPT_CONTEXT.debug_message(f"Saved config to: {file_path}")
-    except FileNotFoundError | ValueError as error:
+    except (FileNotFoundError, ValueError) as error:
         SCRIPT_CONTEXT.debug_message(f"Failed to save config file: {error}")
 
 
-def load_config(data, file_path: str) -> tuple:
+def load_config(file_path: str):
     config: dict = json.loads(load_from_file(file_path))
-    return config.get("filterlist", None), config.get("obsPassword", None), config.get("obsHost", None)
+    return config.get("filterList", None), config.get("obsPassword", None), config.get("obsHost", None)
 
 
 def save_state() -> None:
@@ -347,7 +343,7 @@ def save_state() -> None:
         parser.add_section("STATE")
         parser["STATE"]['debug'] = 'enabled' if SCRIPT_CONTEXT.debug else 'disabled'
         mode: str = get_available_write_mode(STATE_FILE)
-        with open(STATE_FILE, mode) as file:
+        with open(STATE_FILE, mode, encoding="UTF-8") as file:
             parser.write(file)
         SCRIPT_CONTEXT.debug_message(f"State saved to: {STATE_FILE}")
     except BaseException as error:
@@ -359,12 +355,12 @@ def load_state() -> None:
         return
     parser = RawConfigParser()
     parser.read(STATE_FILE)
-    SCRIPT_CONTEXT.debug = (parser['STATE']['debug'] == 'enabled')
+    SCRIPT_CONTEXT.debug = (parser['STATE']['debug'] is 'enabled')
 
 
 def save_to_file(file_path: str, data: str) -> None:
     mode: str = get_available_write_mode(file_path)
-    with open(file_path, mode) as file:
+    with open(file_path, mode, encoding="UTF-8") as file:
         file.write(data)
 
 
@@ -375,7 +371,7 @@ def load_from_file(file_path: str) -> str:
     if not os.path.isfile(file_path):
         raise IsADirectoryError(f"Path is not a file: {file_path}")
     data: str
-    with open(file_path) as file:
+    with open(file_path, encoding="UTF-8") as file:
         data = file.read()
     return data
 
@@ -394,13 +390,13 @@ def get_available_write_mode(file_path: str) -> str:
 
 
 def settings_as_dict(settings) -> dict:
-    hostAddress = obs.obs_data_get_string(settings, "_address")
+    host_address = obs.obs_data_get_string(settings, "_address")
     port = obs.obs_data_get_int(settings, "_port")
-    obsPassword = obs.obs_data_get_string(settings, "_pass")
+    obs_password = obs.obs_data_get_string(settings, "_pass")
 
-    return {"obsHost": f'{hostAddress}:{port}',
-            "obsPassword": obsPassword,
-            "filterlist": get_filters(settings)}
+    return {"obsHost": f'{host_address}:{port}',
+            "obsPassword": obs_password,
+            "filterList": get_filters(settings)}
 
 
 def swing_item_to_dict(swing_array_item) -> dict:
@@ -431,12 +427,12 @@ def int_to_rgb_hex(num: int) -> str:
     return "".join(('#', r, g, b))
 
 
-def create_list_item_json(filterName: str, sourceName: str, displayName: str | None = None, onColor: str | None = None) -> str:
+def create_list_item_json(filter_name: str, source_name: str, display_name: str = "", on_color: str = "") -> str:
     filter = '{\\\"filterName\\\": \\\"%s\\\", \\\"sourceName\\\": \\\"%s\\\"' % (
-        filterName, sourceName)
-    if displayName != None:
-        filter += f', \\\"displayName\\\": \\\"{displayName}\\\"'
-    if onColor != None:
-        filter += f', \\\"onColor\\\": \\\"{onColor}\\\"'
+        filter_name, source_name)
+    if display_name != "":
+        filter += f', \\\"displayName\\\": \\\"{display_name}\\\"'
+    if on_color != "":
+        filter += f', \\\"onColor\\\": \\\"{on_color}\\\"'
     filter += "}"
     return '{"value":"%s","selected":false,"hidden":false}' % filter

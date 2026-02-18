@@ -243,12 +243,18 @@
 	// on click event on an image
 	async function imageClicked(element) {
 		if (!connectionIsOpen) return;
-		if (element.classList.contains("unbound")) return;
-		await obs.call("SetSourceFilterEnabled", {
-			"sourceName": element.getAttribute("s"),
-			"filterName": element.getAttribute("f"),
-			"filterEnabled": !JSON.parse(element.getAttribute("state"))
-		});
+		try {
+			await obs.call("SetSourceFilterEnabled", {
+				"sourceName": element.getAttribute("s"),
+				"filterName": element.getAttribute("f"),
+				"filterEnabled": !JSON.parse(element.getAttribute("state"))
+			});
+			element.classList.remove("unbound")
+		} catch (error) {
+			if (!element.classList.contains("unbound")){
+				element.classList.add("unbound")
+			}
+		}
 	}
 	
 	// update the frontend status graphic

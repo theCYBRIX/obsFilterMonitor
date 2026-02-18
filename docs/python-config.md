@@ -1,4 +1,5 @@
 # Configuration using Python Script
+[Return to main page](../README.md)
 
 ### Table of Contents
 - [Important First Steps](#important-first-steps)
@@ -54,4 +55,6 @@ In the `Filters` list
 - Select the element
 - Use the `∧` and `∨` buttons on the right side of the list to shift the element's position
 
-
+<p align="center" style="margin: 2rem">
+    <a href =#configuration-using-python-script>Back to top</a>
+</p>

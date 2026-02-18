@@ -1,4 +1,5 @@
 # Manual Configuration
+[Return to main page](../README.md)
 
 ### Table of Contents
 - [Introduction](#introduction)
@@ -38,5 +39,6 @@ The following options are available for the `filterslist` array beginning on [li
 - `displayName` (optional): If this property is set, the page will show this custom text instead of the source name followed by the filter name
 - `onColor` (optional): This is a custom color (in a css format) that is displayed for the filter symbol in the -on- state
 
-
-
+<p align="center" style="margin: 2rem">
+    <a href =#manual-configuration>Back to top</a>
+</p>

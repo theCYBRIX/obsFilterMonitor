@@ -1,4 +1,5 @@
 # How To Set up OBS Filter Monitor
+[Return to main page](../README.md)
 
 ### Table of Contents
 - [Getting the Project Files](#getting-the-project-files)
@@ -97,3 +98,7 @@ If you want to use the tool without an internet connection:
 - In monitor.html:
     - Uncomment [line 8](../monitor.html#L8)
     - Comment out [line 7](../monitor.html#L7) (`<!-- This is a comment -->`)
+
+<p align="center" style="margin: 2rem">
+    <a href =#how-to-set-up-obs-filter-monitor>Back to top</a>
+</p>

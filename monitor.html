@@ -28,18 +28,35 @@
 	const defaultOffColor = "#6f6b6f";
 	// This is the symbol that is overlayed over the above color
 	const defaultOffSymbol = g_x_black;
+	// This is the text color for the default state
+	const defaultTextColor = "#f2f2f2";
+	// This is the background color for the -unbound- state
+	const unboundColor = "#ac3939";
+	// This is the text color for the -unbound- state
+	const unboundTextColor = "#ac3939";
 
 	// The fallback -on- color if no custom one is specified
 	const fallbackOnColor = "#32Cd32";
 
+	const socketStates = {
+		0 : "Connecting",
+		1 : "Open",
+		2 : "Closing",
+		3 : "Closed"
+	};
+
+	// The settings-websocket request properties
+	const wsSettings = "settings";
+	const wsFiltersChanged = "filtersChanged";
+
 	// The obs machine ip and port
-	var obsHost = "127.0.0.1:4455";
+	var obsHost = "localhost:4455";
 
 	// The obs-websocket password (if set)
 	var obsPassword = "YourPasswordHERE";
 
 	// The settings server ip and port (Usually the ip is that of the obs machine)
-	var obsSettingsHost = "127.0.0.1:6005"
+	var obsSettingsHost = "localhost:6005";
 
 	// Weather to fetch settings from the settings server (true/false)
 	var useSettingsServer = true;
@@ -53,38 +70,125 @@
 	var interval = null;
 	var connectionIsOpen = false;
 	const obs = new OBSWebSocket();
+
+	var settingsWebSocket;
+	var settingsWasConnected = false;
+	var settingsReconnectInterval = null;
+	var loadingAnimation = null;
+	
 	
 	// initialize
 	async function init() {
 		// If server is enabled try getting settings from there
-		if (useSettingsServer) await refreshSettings();	
-		await attemptConnection();
+		if (useSettingsServer) {
+			await attemptConnectSettingsWS();
+		} else {
+			await attemptConnectOBS();
+		}
 	}
 
 	// Requests settings from the python script
-	async function refreshSettings(){
-		const url = `http://${obsSettingsHost}/?settings`;
-		console.debug("Requesting connection parameters from script");
+	async function requestSettings() {
+		await requestFromSettingsWS(wsSettings);
+	}
 
+	// Requests settings from the python script
+	async function requestFromSettingsWS(message) {
+		if (settingsWebSocket.readyState == WebSocket.OPEN) {
+			packet = { "type": message }
+			console.log(`Requesting "${message}" from settings server.`);
+			await settingsWebSocket.send(JSON.stringify(packet));
+		} else {
+			console.error("Unable to request data: WebSocket not connected.", "SocketState: " + socketStates[settingsWebSocket.readyState]);
+		}
+	}
+
+	// Interprets and handles communications from the settings-websocket
+	async function acceptSettingsPacket(data) {
 		try {
-			const response = await fetch(url);
-			const json = await response.json();
-			console.log(json);
+			if (data.type == wsSettings){
+				filterslist = data.filterList;
+				obsPassword = data.obsPassword;
+				obsHost = data.obsHost;
 
-			filterslist = json.filterlist;
-			obsPassword = json.obsPassword;
-			obsHost = json.obsHost;
+				console.debug(`OBS Host: ${obsHost}\nOBS Password: ${obsPassword}\nFilters: ${JSON.stringify(filterslist)}`);
+				await attemptConnectOBS();
 
-			console.log(`OBS Host: ${obsHost}\nOBS Password: ${obsPassword}\nFilters: ${JSON.stringify(filterslist)}`);
+			} else if (data.type == wsFiltersChanged) {
+				filterslist = data.filterList;
+				await initializeStateIndicators();
+				console.debug(`Filters: ${JSON.stringify(filterslist)}`);
+
+			} else {
+				console.error(`Unknown data type received from settings server: ${data.type}`, data);
+			}
 		} catch (error) {
-			const errorMessage = `Unable to fetch settings: ${error}`;
+			console.error("Incorrectly formatted response from settings server:", error, data);
+		}
+	}
+
+	async function attemptConnectSettingsWS() {
+		try {
+			if (settingsWebSocket){
+				state = settingsWebSocket.readyState;
+				if (state == WebSocket.CONNECTING || state == WebSocket.OPEN){
+					await settingsWebSocket.close(1000, "Resetting Connection");
+				}
+			}
+
+			settingsWebSocket = new WebSocket(`ws://${obsSettingsHost}`)
+
+			/** [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/close_event) */
+			settingsWebSocket.onclose = (event) => {
+				if (settingsWasConnected){
+					console.log("Connection to settings-websocket was closed");
+					toggleErrorDivVisibility(false, "Settings-websocket connection closed. Trying to reconnect...", true);
+				} else {
+					console.error(`Failed to connect to settings-websocket. (ws://${obsSettingsHost})`);
+					toggleErrorDivVisibility(false,`Failed to connect to the settings-websocket. Retrying...`, true);
+				}
+				if (!settingsReconnectInterval) {
+					settingsReconnectInterval = setInterval(attemptConnectSettingsWS, 5000);
+				}
+			}
+			/** [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/error_event) */
+			settingsWebSocket.onerror = (event) => {
+				console.error("Settings-websocket error: ", event);
+			}
+			/** [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/message_event) */
+			settingsWebSocket.onmessage = async (event) => {
+				message = event.data
+				console.debug("Received data from settings server: ", message);
+
+				try{
+					const json = JSON.parse(message);
+
+					await acceptSettingsPacket(json);
+				} catch (error) {
+					const errorMessage = "Failed to parse settings server message.";
+					console.error(errorMessage, error);
+				}
+			}
+			/** [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/open_event) */
+			settingsWebSocket.onopen = (event) => {
+				console.log("Settings server connected: ", event);
+				settingsWasConnected = true;
+				if (settingsReconnectInterval){
+					clearInterval(settingsReconnectInterval)
+					settingsReconnectInterval = null
+				}
+				requestSettings();
+			}
+
+		} catch (error) {
+			const errorMessage = `Unable to connect to settings server: ${error}`;
 			console.error(errorMessage, error);
 			toggleErrorDivVisibility(false, errorMessage);
 		}
 	}
 	
 	// Handle websocket connection stuff
-	async function attemptConnection() {
+	async function attemptConnectOBS() {
 		// Try to connect to obs
 		console.debug("Starting obs-websocket connection attempt");
 		try {
@@ -110,9 +214,10 @@
 	obs.on("ConnectionClosed", () => {
 		console.log("Connection to obs-websocket was closed");
 		connectionIsOpen = false;
-			if (!interval) {
-				interval = setInterval(attemptConnection, 5000);
-			}
+		if (!interval) {
+			if (useSettingsServer) requestSettings()
+			interval = setInterval(attemptConnectOBS, 5000);
+		}
 	});
 
 	// Identified is the new open
@@ -120,8 +225,7 @@
 			clearInterval(interval);
 			connectionIsOpen = true;
 			interval = null;
-			await generateLayout(filterslist);
-			await getInitialState();
+			await initializeStateIndicators();
 	});
 
 	// Handle filter state updates
@@ -139,6 +243,7 @@
 	// on click event on an image
 	async function imageClicked(element) {
 		if (!connectionIsOpen) return;
+		if (element.classList.contains("unbound")) return;
 		await obs.call("SetSourceFilterEnabled", {
 			"sourceName": element.getAttribute("s"),
 			"filterName": element.getAttribute("f"),
@@ -159,8 +264,16 @@
 					element.style.backgroundColor = defaultOffColor;
 				}
 				element.setAttribute("state", enabled);
-			}			
+				element.classList.remove("unbound")
+				element.parentElement.style.color = defaultTextColor
+			}
 		});
+	}
+
+	async function initializeStateIndicators() {
+		await generateLayout(filterslist);
+		await getInitialState();
+		await setInitialState_UnboundItems(); 
 	}
 	
 	// request the initial filter status
@@ -169,6 +282,7 @@
 			await getInitialState_SpecialInputs();
 			await getInitialState_Scenes();
 			await getInitialState_SceneItem();
+			
 		}  catch (error) {
 			console.error("There was an error getting the initial filter states", error);
 		}
@@ -213,6 +327,20 @@
 			};
 		}
 	}
+	
+	// initialize the frontend status graphic of filters that OBS does not have
+	function setInitialState_UnboundItems() {
+		const elements = document.body.querySelectorAll("#filterlist > div > img.stateIndicator");
+		elements.forEach(element => {
+			if (!element.hasAttribute("state")){
+				element.parentElement.style.color = unboundTextColor
+				element.src = defaultOffSymbol;
+				element.style.backgroundColor = unboundColor;
+				element.setAttribute("state", false);
+				element.classList.add("unbound")
+			}
+		});
+	}
 
 	// generates the layout for the frontend
 	function generateLayout(list) {
@@ -220,23 +348,35 @@
 		list.forEach((item) => {
 			// Add label
 			if (item.hasOwnProperty("displayName")) {
-				lines += `<div>${item["displayName"]}<br>`;
+				lines += `<div class="indicatorLabel">${item["displayName"]}<br>`;
 			} else {
-				lines += `<div>${item["sourceName"]}<br>${item["filterName"]}<br>`;
+				lines += `<div class="indicatorLabel">${item["sourceName"]}<br>${item["filterName"]}<br>`;
 			}
 			// Add image
 			if (item.hasOwnProperty("onColor")) {
-				lines += `<img f="${item["filterName"]}" s="${item["sourceName"]}" c="${item["onColor"]}" src="" onclick="imageClicked(this);" /></div>`;
+				lines += `<img class="stateIndicator" f="${item["filterName"]}" s="${item["sourceName"]}" c="${item["onColor"]}" src="" onclick="imageClicked(this);" /></div>`;
 			} else {
-				lines += `<img f="${item["filterName"]}" s="${item["sourceName"]}" src="" onclick="imageClicked(this);" /></div>`;
+				lines += `<img class="stateIndicator" f="${item["filterName"]}" s="${item["sourceName"]}" src="" onclick="imageClicked(this);" /></div>`;
 			}
 		});
+
 		document.getElementById("filterlist").innerHTML = lines;
+
+		if (lines == "") {
+			toggleErrorDivVisibility(false, "There are no filters configured, but everything is working correctly! ദ്ദി ˉ꒳ˉ )✧ ")
+		} else {
+			toggleErrorDivVisibility(true)
+		}
 	}
 
-	function toggleErrorDivVisibility(hidden = True, message = "") {
+	function toggleErrorDivVisibility(hidden = true, message = "", animateLoading = false) {
 		errorbox = document.getElementById("errorbox")
 		filterlist = document.getElementById("filterlist")
+
+		if (loadingAnimation) {
+			clearInterval(loadingAnimation);
+			loadingAnimation = null;
+		}
 
 		if (hidden) {
 			errorbox.style.display = "none";
@@ -245,7 +385,21 @@
 			errorbox.textContent = message;
 			errorbox.style.display = "block";
 			filterlist.style.display = "none";
+			if(animateLoading){
+				loadingAnimation = setInterval(animateLoadingDots, 500)
+			}
 		}
+	}
+
+	function animateLoadingDots(){
+		errorbox = document.getElementById("errorbox")
+		text = errorbox.textContent;
+		if (text.endsWith("...")){
+			text = text.slice(0, text.length - 3);
+		} else {
+			text += ".";
+		}
+		errorbox.textContent = text;
 	}
 	</script>
 	<style>
@@ -271,6 +425,7 @@
 	}
 
 	img {
+		border-radius: 15%;
 		margin-top: 5px;
 	}
 

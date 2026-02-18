@@ -229,7 +229,7 @@ def script_properties():
     obs.obs_properties_add_group(
         props, "_filter_monitor", "Filters", obs.OBS_GROUP_NORMAL, filter_group)
 
-    # OBS Websocket
+    # OBS WebSocket
     obs_websocket_group = obs.obs_properties_create()
     obs.obs_properties_add_text(
         obs_websocket_group, "_address", "Address: ", obs.OBS_TEXT_DEFAULT)
@@ -238,7 +238,7 @@ def script_properties():
     obs.obs_properties_add_text(
         obs_websocket_group, "_pass", "Password: ", obs.OBS_TEXT_PASSWORD)
     obs.obs_properties_add_group(
-        props, "_obs_websocket", "OBS Websocket Settings",
+        props, "_obs_websocket", "OBS WebSocket Settings",
         obs.OBS_GROUP_NORMAL, obs_websocket_group
     )
 

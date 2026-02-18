@@ -1,11 +1,11 @@
-# How To Setup OBS Filter Monitor
+# How To Set up OBS Filter Monitor
 
 ### Table of Contents
 - [Getting the Project Files](#getting-the-project-files)
-- [Ways to Setup FilterMonitor](#ways-to-setup-filtermonitor)
+- [Ways to Set up FilterMonitor](#ways-to-set-up-filtermonitor)
     - [Dynamic Configuration Script](#using-config-script)
     - [Manual Configuration](#manual-config)
-- [Setup Inside OBS](#setup-inside-obs)
+- [Set up Inside OBS](#set-up-inside-obs)
     - [Enabling OBS WebSocket Server](#enabling-obs-websocket-server)
     - [Adding the FilterMonitor Dock](#adding-the-filtermonitor-dock)
 - [Advanced Usage](#advanced-usage)
@@ -19,15 +19,15 @@ To get the repository files, either:
 - Use git to clone the repo.
 
 
-## Ways to Setup FilterMonitor
-To setup and use FilterMonitor, you can either:
+## Ways to Set up FilterMonitor
+To set up and use FilterMonitor, you can either:
 
 <a id="using-config-script"></a>
 - [Use the configuration manager Python script](python-config.md) (easier to add, remove, reorder and modify filters whenever)
 <a id="manual-config"></a>
 - [Manually configure the monitor](manual-config.md) (Faster startup times; Less potential points of failure)
 
-## Setup Inside OBS
+## Set up Inside OBS
 
 ### Enabling OBS WebSocket Server
 - In OBS, go to `Tools > WebSocket Server Settings`

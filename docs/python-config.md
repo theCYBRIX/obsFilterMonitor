@@ -9,7 +9,7 @@
 - [Changing the order of elements](#changing-element-order)
 
 ### Important First Steps
-- Ensure you have the [OBS WebSocket Server enabled and configured](how-to-setup.md#enabling-obs-websocket-server).
+- Ensure you have the [OBS WebSocket Server enabled and configured](how-to-set-up.md#enabling-obs-websocket-server).
 - Ensure the "[useSettingsServer](../monitor.html#L62)" field within `monitor.html` (line 62) is set to `true`.  
 Otherwise the monitor will not retrieve settings from the `filter_monitor_config.py`.
 

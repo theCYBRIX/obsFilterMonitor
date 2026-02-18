@@ -23,7 +23,7 @@ You can add or remove filters depending on your needs.
 
 #### Important First Steps
 Either use the [quick setup method](#quick-setup-on-windows) (Windows only), or do the following:
-- Ensure you have the [OBS WebSocket Server enabled and configured](how-to-setup.md#enabling-obs-websocket-server).
+- Ensure you have the [OBS WebSocket Server enabled and configured](how-to-set-up.md#enabling-obs-websocket-server).
     - If `Enable Authentication` was checked, make sure to update the [obsPassword](../monitor.html#L56) field (line 56).
 - Ensure the "[useSettingsServer](../monitor.html#L62)" field within `monitor.html` (line 62) is set to `false` when using a manual configuration.
 

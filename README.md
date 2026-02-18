@@ -1,6 +1,6 @@
 # OBS Filter Monitor
 
-This tool allows you to monitor the enabled state of one or multiple source filters within your OBS environment live and toggle the filters on or off by clicking on the respective monitor element.  
+This tool allows you to monitor and toggle the enabled state of one or multiple source filters within your OBS environment.  
 The Filter Monitor can be run inside OBS custom browser docks or any modern web browser.
 
 <img src="docs/example1.png" width=292px height=202px/>

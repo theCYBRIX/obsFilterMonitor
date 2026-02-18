@@ -9,6 +9,10 @@
 - [Set up Inside OBS](#set-up-inside-obs)
     - [Enabling OBS WebSocket Server](#enabling-obs-websocket-server)
     - [Adding the FilterMonitor Dock](#adding-the-filtermonitor-dock)
+- [Customizing FilterMonitor](#customizing-filtermonitor)
+    - [Modifying Visuals](#modifying-visuals)
+    - [Creating Custom Overlay Symbols](#creating-custom-overlay-symbols)
+    - [How to find Color Codes](#how-to-find-color-codes)
 - [Advanced Usage](#advanced-usage)
     - [Monitoring for Another Device](#monitoring-from-another-device)
     - [Using the Tool Without an Internet Connection](#using-the-tool-without-an-internet-connection)
@@ -75,11 +79,11 @@ You can create custom overlay symbols (such as the "X" or "off" text) for disabl
 
 
 ### FAQ
-#### How to find color codes
+#### How to Find Color Codes
 To generate the css color codes, search google for "css color picker".  
 Select the desired color and use the value displayed under "HEX" (Include the "#"; If the value starts with "0x" replace this with "#").
 
-## Advanced usage
+## Advanced Usage
 For those that know what they are doing. For any help, refer to the [help section](../README.md#help).
 
 ### Monitoring from Another Device

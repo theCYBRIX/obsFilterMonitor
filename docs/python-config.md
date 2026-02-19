@@ -3,6 +3,7 @@
 
 ### Table of Contents
 - [Important First Steps](#important-first-steps)
+    - [Installing Dependencies](#manually-installing-websockets-91)
 - [Setup](#setup)
 - [Configuring the Filter Monitor](#configuring-the-filter-monitor)
     - [Adding monitor elements](#add-monitor-element)
@@ -18,6 +19,12 @@ The python script does this by hosting a WebSocket, allowing for settings to be 
 - Ensure you have the [OBS WebSocket Server enabled and configured](set-up-inside-obs.md#enabling-obs-websocket-server).
 - Ensure the "[useSettingsServer](../monitor.html#L62)" field within `monitor.html` (line 62) is set to `true`.  
 Otherwise the monitor will not retrieve settings from the `filter_monitor_config.py`.
+- In the same folder as `filter_monitor_config.py`, place the `installDependencies.bat` file and run it, or [manually install WebSockets 9.1](#manually-installing-websockets-91).
+
+#### Manually Installing WebSockets 9.1
+1) run `pip install websockets==9.1 -t ./lib` in the folder where `filter_monitor_config.py` is located.  
+This will create a folder called `lib`.
+2) Create a file called `__init__.py` and place it in the `lib` folder (the file can be empty).
 
 ### Setup
 

@@ -19,9 +19,9 @@ except ModuleNotFoundError as e:
         "\tIn the folder this script is in, run 'pip install websockets==9.1 -t ./lib'\n" +
         "\tEnsure the 'lib' directory contains an '__init__.py' file (the file can be empty)."
     ) from e
-         
 
-PORT = 6005
+
+PORT : int = 6005
 SCRIPT_PATH: str = path.dirname(path.abspath(__file__)) + path.sep
 CONFIG_FILE: str = SCRIPT_PATH + "fm_config_export.json"
 STATE_FILE: str = SCRIPT_PATH + "fm_config_state.ini"
@@ -38,7 +38,7 @@ WS_FILTERS_CHANGED: str = "filtersChanged"
 class ScriptContext:
     def __init__(self) -> None:
         self.obs_data = None
-        self.debug: bool = False
+        self.debug : bool = False
         self.obs_properties = None
 
         self.combo_initialized : bool = False
@@ -136,8 +136,7 @@ class SettingsServer:
                 self.websocket_peers.remove(websocket)
 
 
-    async def broadcast_message(self, message : str):# -> Awaitable[Any]:
-        packet = json.dumps({"type" : message})
+    async def send_to_peers(self, message : str):# -> Awaitable[Any]:
         for peer in self.websocket_peers:
             try:
                 await peer.send(message)
@@ -375,14 +374,14 @@ def on_filter_list_changed(props, prop, settings) -> bool:
     update_copy_button_state(props)
 
     if SETTINGS_SERVER.asyncio_loop is not None:
-        broadcast_msg : str = json.dumps(
+        update_event : str = json.dumps(
                 {
                     "type" : WS_FILTERS_CHANGED,
                     "filterList": filter_list
                 }
             )
         asyncio.run_coroutine_threadsafe(
-            SETTINGS_SERVER.broadcast_message(broadcast_msg),
+            SETTINGS_SERVER.send_to_peers(update_event),
             SETTINGS_SERVER.asyncio_loop
         )
 
@@ -444,7 +443,9 @@ def get_selected_filter_as_dict(data) -> Optional[dict]:
     if index >= filter_count:
         if filter_count > 0:
             SCRIPT_CONTEXT.print_error(
-                f"Invalid index {index} returned for selected filter. (# filters: {filter_count})")
+                f"Invalid index {index} returned for selected filter. " +
+                f"(num filters: {filter_count})"
+            )
         return None
     selected_item = filter_list[index]
 
@@ -508,10 +509,16 @@ def save_config(settings, file_path: str) -> None:
 
 
 def load_config(file_path: str) -> tuple:
-    config: dict = json.loads(load_from_file(file_path))
-    return config.get("filterList", None), \
-           config.get("obsPassword", None), \
-           config.get("obsHost", None)
+    config : dict
+    try:
+        config = json.loads(load_from_file(file_path))
+        return config.get("filterList", None), \
+               config.get("obsPassword", None), \
+               config.get("obsHost", None)
+
+    except (IsADirectoryError, FileNotFoundError) as e:
+        SCRIPT_CONTEXT.print_debug(f"Failed to load config: {e}")
+        return None, None, None
 
 
 def save_state() -> None:
@@ -523,7 +530,7 @@ def save_state() -> None:
         with open(STATE_FILE, mode, encoding="UTF-8") as file:
             parser.write(file)
         SCRIPT_CONTEXT.print_debug(f"State saved to: {STATE_FILE}")
-    except BaseException as error:
+    except IOError as error:
         SCRIPT_CONTEXT.print_debug(f"Error saving state: {error}")
 
 
@@ -635,15 +642,14 @@ def filter_as_json(
         on_color: Optional[str] = None
     ) -> str:
 
-    item_json = "{" + f'\\\"{FLT_FILTER_NAME}\\\": \\\"{filter_name}\\\", ' + \
-                      f'\\\"{FLT_SOURCE_NAME}\\\": \\\"{source_name}\\\"'
+    item_json : str = "{" + f'\\\"{FLT_FILTER_NAME}\\\": \\\"{filter_name}\\\", ' + \
+                            f'\\\"{FLT_SOURCE_NAME}\\\": \\\"{source_name}\\\"'
     if display_name and not display_name.isspace():
         item_json += f', \\\"{FLT_DISPLAY_NAME}\\\": \\\"{display_name}\\\"'
     if on_color and not on_color.isspace():
         item_json += f', \\\"{FLT_ON_COLOR}\\\": \\\"{on_color}\\\"'
     item_json += "}"
     return item_json
-
 
 
 def create_list_item_json(value : str) -> str:

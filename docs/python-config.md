@@ -4,13 +4,18 @@
 ### Table of Contents
 - [Important First Steps](#important-first-steps)
 - [Setup](#setup)
-- [Adding monitor elements](#add-monitor-element)
-- [Removing monitor elements](#remove-monitor-element)
-- [Editing monitor elements](#edit-monitor-element)
-- [Changing the order of elements](#changing-element-order)
+- [Configuring the Filter Monitor](#configuring-the-filter-monitor)
+    - [Adding monitor elements](#add-monitor-element)
+    - [Removing monitor elements](#remove-monitor-element)
+    - [Editing monitor elements](#edit-monitor-element)
+    - [Changing the order of elements](#changing-element-order)
+
+### Introduction
+When using the Python script to configure FilterMonitor, the script gives a convenient interface within OBS (`Tools > Scripts`) where filters can be added, removed, edited and re-arranged.  
+The python script does this by hosting a WebSocket, allowing for settings to be synchronized in real-time and update dynamically.
 
 ### Important First Steps
-- Ensure you have the [OBS WebSocket Server enabled and configured](how-to-set-up.md#enabling-obs-websocket-server).
+- Ensure you have the [OBS WebSocket Server enabled and configured](set-up-inside-obs.md#enabling-obs-websocket-server).
 - Ensure the "[useSettingsServer](../monitor.html#L62)" field within `monitor.html` (line 62) is set to `true`.  
 Otherwise the monitor will not retrieve settings from the `filter_monitor_config.py`.
 
@@ -23,6 +28,7 @@ Otherwise the monitor will not retrieve settings from the `filter_monitor_config
 5) If WebSocket authentication is enabled:
     - Scroll down to `OBS WebSocket Settings` and input your settings (Address/Port/Password)
 
+## Configuring the Filter Monitor
 <a id="add-monitor-element"></a>
 To **add a new monitor element**:  
 Below the `Filters` list, fill in the filter properties:

@@ -12,6 +12,6 @@ Thumbs.db
 
 # Monitor Config
 config.json
-script_state.ini
+fm_config_state.ini
 __pycache__
 lib

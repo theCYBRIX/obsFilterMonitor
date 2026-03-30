@@ -68,6 +68,7 @@
 
 	// some variables, don't change!
 	var interval = null;
+	const connectAttemptDelay = 5000
 	var connectionIsOpen = false;
 	const obs = new OBSWebSocket();
 
@@ -87,6 +88,30 @@
 		}
 	}
 
+	function startAttemptConnectOBS() {
+		stopAttemptConnectOBS()
+		interval = setInterval(attemptConnectOBS, connectAttemptDelay)
+	}
+
+	function startAttemptConnectSettings() {
+		stopAttemptConnectSettings()
+		settingsReconnectInterval = setInterval(attemptConnectSettingsWS, connectAttemptDelay)
+	}
+
+	function stopAttemptConnectSettings() {
+		if (settingsReconnectInterval) {
+			clearInterval(settingsReconnectInterval);
+			settingsReconnectInterval = null
+		}
+	}
+
+	function stopAttemptConnectOBS() {
+		if (interval) {
+			clearInterval(interval);
+			interval = null
+		}
+	}
+
 	// Requests settings from the python script
 	async function requestSettings() {
 		await requestFromSettingsWS(wsSettings);
@@ -95,11 +120,14 @@
 	// Requests settings from the python script
 	async function requestFromSettingsWS(message) {
 		if (settingsWebSocket.readyState == WebSocket.OPEN) {
-			packet = { "type": message }
+			packet = { "type": message };
 			console.log(`Requesting "${message}" from settings server.`);
 			await settingsWebSocket.send(JSON.stringify(packet));
 		} else {
 			console.error("Unable to request data: WebSocket not connected.", "SocketState: " + socketStates[settingsWebSocket.readyState]);
+			if(socketStates[settingsWebSocket.readyState] != "Open" && socketStates[settingsWebSocket.readyState] != "Connecting") {
+				startAttemptConnectSettingsWS()
+			}
 		}
 	}
 
@@ -112,7 +140,7 @@
 				obsHost = data.obsHost;
 
 				console.debug(`OBS Host: ${obsHost}\nOBS Password: ${obsPassword}\nFilters: ${JSON.stringify(filterslist)}`);
-				await attemptConnectOBS();
+				startAttemptConnectOBS()
 
 			} else if (data.type == wsFiltersChanged) {
 				filterslist = data.filterList;
@@ -136,6 +164,7 @@
 				}
 			}
 
+			console.debug("Attempting to connect to the settings WebSocket")
 			settingsWebSocket = new WebSocket(`ws://${obsSettingsHost}`)
 
 			/** [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/close_event) */
@@ -147,9 +176,7 @@
 					console.error(`Failed to connect to settings-websocket. (ws://${obsSettingsHost})`);
 					toggleErrorDivVisibility(false,`Failed to connect to the settings-websocket. Retrying...`, true);
 				}
-				if (!settingsReconnectInterval) {
-					settingsReconnectInterval = setInterval(attemptConnectSettingsWS, 5000);
-				}
+				startAttemptConnectSettingsWS();
 			}
 			/** [MDN Reference](https://developer.mozilla.org/docs/Web/API/WebSocket/error_event) */
 			settingsWebSocket.onerror = (event) => {
@@ -173,10 +200,7 @@
 			settingsWebSocket.onopen = (event) => {
 				console.log("Settings server connected: ", event);
 				settingsWasConnected = true;
-				if (settingsReconnectInterval){
-					clearInterval(settingsReconnectInterval)
-					settingsReconnectInterval = null
-				}
+				stopAttemptConnectSettings();
 				requestSettings();
 			}
 
@@ -190,6 +214,7 @@
 	// Handle websocket connection stuff
 	async function attemptConnectOBS() {
 		// Try to connect to obs
+
 		console.debug("Starting obs-websocket connection attempt");
 		try {
 			if (connectionIsOpen) await obs.disconnect();
@@ -205,26 +230,30 @@
 				toggleErrorDivVisibility(false, "Could not load websocket library. Please check your internet connection.");
 			} else {
 				toggleErrorDivVisibility(false, `The connection to obs failed with the following error: ${error.message || "No reason specified"}`);
+				if(useSettingsServer){
+					stopAttemptConnectOBS();
+					await requestSettings();
+				}
 			}
 			
 		}
 	}
 
 	// obs-websocket connection was closed for whatever reason
-	obs.on("ConnectionClosed", () => {
+	obs.on("ConnectionClosed", async () => {
 		console.log("Connection to obs-websocket was closed");
 		connectionIsOpen = false;
-		if (!interval) {
-			if (useSettingsServer) requestSettings()
-			interval = setInterval(attemptConnectOBS, 5000);
+		if(useSettingsServer){
+			await requestSettings();
+		} else {
+			startAttemptConnectOBS();
 		}
 	});
 
 	// Identified is the new open
 	obs.on("Identified", async () => {
-			clearInterval(interval);
+			stopAttemptConnectOBS();
 			connectionIsOpen = true;
-			interval = null;
 			await initializeStateIndicators();
 	});
 

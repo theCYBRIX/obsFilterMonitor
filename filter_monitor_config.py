@@ -6,6 +6,7 @@ from os import path
 from typing import Optional
 from threading import Thread
 from configparser import RawConfigParser
+from http.server import BaseHTTPRequestHandler, HTTPServer
 import obspython as obs # pyright: ignore[reportMissingImports]
 try:
     from lib.websockets.legacy.server import (
@@ -15,16 +16,25 @@ try:
     )
 except ModuleNotFoundError as e:
     raise ModuleNotFoundError(
-        "Missing import websockets 9.1.\n" +
-        "\tIn the folder this script is in, run 'pip install websockets==9.1 -t ./lib'\n" +
-        "\tEnsure the 'lib' directory contains an '__init__.py' file (the file can be empty)."
+        "Missing import: websockets\n" +
+        "\tIn the folder this script is in, run 'pip install websockets -t ./lib'\n" +
+        "\tEnsure the 'lib' directory contains an '__init__.py' file (the file can be empty).\n" +
+        "\tIf you are using an older version of Python, you may need an older version of " +
+        "websockets, such as websockets==9.1 for Python 3.6."
     ) from e
 
 
-PORT : int = 6005
+SETTINGS_PORT : int = 6005
+MONITOR_PORT : int = 6006
 SCRIPT_PATH: str = path.dirname(path.abspath(__file__)) + path.sep
+MONITOR_PATH: str = SCRIPT_PATH + "monitor.html"
 CONFIG_FILE: str = SCRIPT_PATH + "fm_config_export.json"
 STATE_FILE: str = SCRIPT_PATH + "fm_config_state.ini"
+
+HTTP_OK : int = 200
+HTTP_NOT_EXIST : int = 404
+HTTP_NOT_ALLOWED : int = 405
+HTTP_SERVER_ERROR : int = 500
 
 FLT_DISPLAY_NAME: str = "displayName"
 FLT_FILTER_NAME: str = "filterName"
@@ -68,23 +78,35 @@ class SettingsServer:
         self.asyncio_thread = None
         self.settings_server = None
 
-    def start(self, host : str = "localhost", port : int = PORT) -> None:
+    def start(self, host : str = "localhost", port : int = SETTINGS_PORT) -> None:
         SCRIPT_CONTEXT.print_debug('Starting settings server...')
 
         def run_service():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            self.asyncio_loop = loop
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                self.asyncio_loop = loop
 
-            start_server = serve(self.handle_websocket, host, port)
-            self.settings_server = start_server
+                start_server = serve(self.handle_websocket, host, port)
+                self.settings_server = start_server
 
-            loop.run_until_complete(start_server)
-            loop.run_forever()
+                loop.run_until_complete(start_server)
+                loop.run_forever()
+            except:
+                SCRIPT_CONTEXT.print_error(
+                    "Settings server ran into an error and shutdown." \
+                    "\nThis can be caused by using a version of websockets, " +
+                    "incompatible with your Python version." +
+                    "\nExample: For Python 3.6, use websockets==9.1 by running " +
+                    "'pip install websockets==9.1 -t ./lib' in the same folder " +
+                    "as the Python script."
+                )
 
         thread = Thread(target=run_service, name="Settings Server", daemon=True)
         self.asyncio_thread = thread
         thread.start()
+        
+        SCRIPT_CONTEXT.print_debug(f'Started settings server: ws://{host}:{port}')
 
     def stop(self, code : int = 1000, reason : str = "") -> None:
         if not self.asyncio_loop:
@@ -144,17 +166,90 @@ class SettingsServer:
                 SCRIPT_CONTEXT.print_error(f"Error sending message to peer: {e}")
 
 
+class MonitorHTTPHandler(BaseHTTPRequestHandler):
+
+    def do_GET(self) -> None:
+        print(self.path)
+        if self.path == "/favicon.ico":
+            self.send_error(HTTP_NOT_EXIST)
+            return
+        if self.path != "/monitor.html":
+            self.send_error(HTTP_NOT_ALLOWED, "Only getting monitor.html is allowed.")
+            return
+
+        lines : list[str] = []
+
+        try:
+            with open(MONITOR_PATH, "r", encoding="UTF-8") as htmlFile:
+                lines = htmlFile.readlines()
+        except FileNotFoundError as e:
+            self.send_error(HTTP_NOT_EXIST, "Unable to find monitor.html.")
+            return
+
+        
+        if not lines:
+            self.send_error(HTTP_SERVER_ERROR, "Unable to load monitor.html, or the file is empty.")
+        else:
+            self.send_response(HTTP_OK)
+            self.send_header("Content-type", "text/html")
+            self.end_headers()
+            
+            line_bytes : list[bytes] = []
+            for line in lines:
+                line_bytes.append(line.encode())
+
+            self.wfile.writelines(line_bytes)
+    
+    def do_POST(self) -> None:
+        self.send_error(HTTP_NOT_ALLOWED, "Only getting monitor.html is allowed.")
+
+
+class MonitorHTTPServer(HTTPServer):
+
+    def __init__(self, host_details : tuple[str, str], http_handler : MonitorHTTPHandler) -> None:
+        super().__init__(host_details, http_handler)
+        self.server_thread : Thread
+        self.host : str = host_details[0]
+        self.port : str = host_details[1]
+
+    
+    def start(self) -> Thread:
+        SCRIPT_CONTEXT.print_debug('Starting web server...')
+        def run_service():
+            try:
+                self.serve_forever()
+            except Exception as e:
+                SCRIPT_CONTEXT.print_error(
+                    "Web server ran into an error and shutdown:\n\t" + str(e)
+                )
+            finally:
+                self.server_close()
+
+        thread = Thread(target=run_service, name="Settings Server", daemon=True)
+        self.server_thread = thread
+        thread.start()
+        SCRIPT_CONTEXT.print_debug(f"Started web server: http://{self.host}:{self.port}")
+    
+    def stop(self) -> None:
+        self.shutdown()
+
+
+
+
 SCRIPT_CONTEXT: ScriptContext = ScriptContext()
 SETTINGS_SERVER : SettingsServer = SettingsServer()
+WEB_SERVER : MonitorHTTPServer = MonitorHTTPServer(("0.0.0.0", MONITOR_PORT), MonitorHTTPHandler)
 
 
 def script_load(settings) -> None:
     load_state()
     SCRIPT_CONTEXT.obs_data = settings
     SETTINGS_SERVER.start()
+    WEB_SERVER.start()
 
 
 def script_unload() -> None:
+    WEB_SERVER.stop()
     SETTINGS_SERVER.stop(reason="Script Unloading.")
 
     if SETTINGS_SERVER.asyncio_thread:
@@ -162,6 +257,7 @@ def script_unload() -> None:
 
     SCRIPT_CONTEXT.clear()
     SETTINGS_SERVER.clear()
+
 
 
 def script_save(settings) -> None:
@@ -212,7 +308,7 @@ def script_properties():
 
     # >> Copy Filter Properties
     copy_filter_group = obs.obs_properties_create()
-    filter_combo = obs.obs_properties_add_list(
+    obs.obs_properties_add_list(
         copy_filter_group, "_filter_combo", "Filter: ",
         obs.OBS_COMBO_TYPE_LIST, obs.OBS_COMBO_FORMAT_INT
     )
@@ -505,7 +601,10 @@ def save_config(settings, file_path: str) -> None:
         save_to_file(file_path, json.dumps(settings_as_dict(settings)))
         SCRIPT_CONTEXT.print_debug(f"Saved config to: {file_path}")
     except (FileNotFoundError, ValueError) as error:
-        SCRIPT_CONTEXT.print_debug(f"Failed to save config file: {error}")
+        SCRIPT_CONTEXT.print_debug(
+            f"Failed to save config file: {error}\n" +
+            "The directory may require administrative privilages for modification."
+        )
 
 
 def load_config(file_path: str) -> tuple:
